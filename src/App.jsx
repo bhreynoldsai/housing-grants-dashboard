@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useEffect } from "react";
 import {
   Search, MapPin, Filter, X, ExternalLink, Info, Star,
   Home, Building2, Landmark, DollarSign, RefreshCw,
@@ -124,10 +124,39 @@ export default function App() {
     setShortlist((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id]));
   }
 
-  const liveOpportunities = liveData?.opportunities || [];
-  const liveFetchedAt = liveData?.fetchedAt
-    ? new Date(liveData.fetchedAt).toLocaleString()
-    : null;
+  // Live Grants.gov opportunities: fetched at runtime from our /api/grants
+  // serverless function (which proxies Grants.gov's public search2 API).
+  // Falls back to the static liveData snapshot if the live call fails.
+  const [live, setLive] = useState({
+    opportunities: liveData?.opportunities || [],
+    fetchedAt: liveData?.fetchedAt || null,
+    loading: true,
+    failed: false,
+  });
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/grants")
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
+      .then((d) => {
+        if (cancelled) return;
+        setLive({
+          opportunities: Array.isArray(d.opportunities) ? d.opportunities : [],
+          fetchedAt: d.fetchedAt || null,
+          loading: false,
+          failed: false,
+        });
+      })
+      .catch(() => {
+        if (!cancelled) setLive((s) => ({ ...s, loading: false, failed: true }));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const liveOpportunities = live.opportunities;
+  const liveFetchedAt = live.fetchedAt ? new Date(live.fetchedAt).toLocaleString() : null;
 
   return (
     <div className="min-h-screen w-full bg-[#F5F2EA] text-[#1B2430]" style={{ fontFamily: "'Source Sans Pro', ui-sans-serif, system-ui" }}>
@@ -369,7 +398,7 @@ export default function App() {
             ))}
 
             {/* ---------- LIVE GRANTS.GOV OPPORTUNITIES ---------- */}
-            <LiveOpportunities opportunities={liveOpportunities} fetchedAt={liveFetchedAt} />
+            <LiveOpportunities opportunities={liveOpportunities} fetchedAt={liveFetchedAt} loading={live.loading} failed={live.failed} />
           </div>
 
           {/* Sidebar: shortlist */}
@@ -478,7 +507,7 @@ export default function App() {
   );
 }
 
-function LiveOpportunities({ opportunities, fetchedAt }) {
+function LiveOpportunities({ opportunities, fetchedAt, loading, failed }) {
   return (
     <div className="mt-6 rounded-sm border border-[#DED7C4] bg-white px-5 py-4">
       <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#EFEBDD] pb-2">
@@ -487,15 +516,26 @@ function LiveOpportunities({ opportunities, fetchedAt }) {
           <h4 className="text-sm font-semibold">Live Opportunities (Grants.gov)</h4>
         </div>
         <span className="flex items-center gap-1 text-[11px] text-[#8A8577]">
-          <RefreshCw className="h-3 w-3" />
-          {fetchedAt ? `Last refreshed ${fetchedAt}` : "Not yet fetched"}
+          <RefreshCw className={classNames("h-3 w-3", loading && "animate-spin")} />
+          {loading
+            ? "Loading live feed…"
+            : fetchedAt
+            ? `Live as of ${fetchedAt}`
+            : failed
+            ? "Live feed unavailable"
+            : "No data"}
         </span>
       </div>
 
-      {opportunities.length === 0 ? (
+      {loading ? (
         <p className="mt-3 text-xs text-[#6B6552]">
-          No live data yet. Run <code className="rounded bg-[#EFEBDD] px-1 py-0.5">npm run fetch-grants</code> to pull
-          currently posted/forecasted housing opportunities directly from the public Grants.gov API into this panel.
+          Fetching currently posted and forecasted housing opportunities from the public Grants.gov API…
+        </p>
+      ) : opportunities.length === 0 ? (
+        <p className="mt-3 text-xs text-[#6B6552]">
+          {failed
+            ? "Couldn't reach the Grants.gov live feed right now — try refreshing in a moment."
+            : "No currently posted or forecasted housing opportunities matched the search right now. This panel updates automatically as Grants.gov postings change."}
         </p>
       ) : (
         <ul className="mt-3 divide-y divide-[#EFEBDD]">
