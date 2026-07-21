@@ -25,7 +25,8 @@ const QUERIES = [
   { keyword: "home repair" },
 ];
 
-const STATUSES = ["posted", "forecasted"];
+// Grants.gov search2 expects oppStatuses as a pipe-delimited STRING.
+const STATUSES = "forecasted|posted";
 
 function pick(obj, keys, fallback = null) {
   for (const k of keys) {
@@ -104,9 +105,10 @@ export default async function handler(req, res) {
     const hits = extractHits(firstRaw);
     res.setHeader("Cache-Control", "no-store");
     res.status(200).json({
-      topKeys: firstRaw ? Object.keys(firstRaw) : null,
-      dataKeys: firstRaw && firstRaw.data ? Object.keys(firstRaw.data) : null,
-      dataType: firstRaw && firstRaw.data ? (Array.isArray(firstRaw.data) ? "array" : typeof firstRaw.data) : null,
+      errorcode: firstRaw ? firstRaw.errorcode : null,
+      msg: firstRaw ? firstRaw.msg : null,
+      dataHitCount: firstRaw && firstRaw.data ? firstRaw.data.hitCount : null,
+      dataErrorMsgs: firstRaw && firstRaw.data ? firstRaw.data.errorMsgs : null,
       hitCount: Array.isArray(hits) ? hits.length : 0,
       sampleHitKeys: Array.isArray(hits) && hits[0] ? Object.keys(hits[0]) : null,
       sampleHit: Array.isArray(hits) && hits[0] ? hits[0] : null,
