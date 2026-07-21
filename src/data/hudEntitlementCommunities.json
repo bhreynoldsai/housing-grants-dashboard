@@ -1,0 +1,7 @@
+{
+  "fetchedAt": null,
+  "datasets": [],
+  "jurisdictionCount": 0,
+  "jurisdictions": [],
+  "note": "This file is empty until you run `npm run fetch-hud`. That script pulls HUD's real CDBG/HOME entitlement jurisdiction list from HUD's public ArcGIS Open Data site. Until then, the dashboard falls back to the static GA_ENTITLEMENT / MO_ENTITLEMENT lists in src/data/programs.js."
+}

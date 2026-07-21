@@ -1,0 +1,6 @@
+{
+  "fetchedAt": null,
+  "queries": [],
+  "opportunities": [],
+  "note": "This file is empty until you run `npm run fetch-grants`. That script calls Grants.gov's public search2 API (no key required) and overwrites this file with currently posted/forecasted housing-related opportunities."
+}
