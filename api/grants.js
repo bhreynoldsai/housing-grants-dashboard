@@ -86,36 +86,16 @@ function extractHits(json) {
 export default async function handler(req, res) {
   const errors = [];
   const all = [];
-  let firstRaw = null;
 
   // Run all keyword searches concurrently; a failure of one doesn't sink the rest.
   const results = await Promise.allSettled(QUERIES.map((q) => searchRaw(q)));
   results.forEach((r, i) => {
     if (r.status === "fulfilled") {
-      if (!firstRaw) firstRaw = r.value;
       extractHits(r.value).forEach((hit) => all.push(mapHit(hit)));
     } else {
       errors.push({ query: QUERIES[i], error: String(r.reason && r.reason.message ? r.reason.message : r.reason) });
     }
   });
-
-  // Temporary: expose the raw response structure so field mapping can be
-  // confirmed against the live API. Access via /api/grants?debug=1
-  if (req.query && req.query.debug) {
-    const hits = extractHits(firstRaw);
-    res.setHeader("Cache-Control", "no-store");
-    res.status(200).json({
-      errorcode: firstRaw ? firstRaw.errorcode : null,
-      msg: firstRaw ? firstRaw.msg : null,
-      dataHitCount: firstRaw && firstRaw.data ? firstRaw.data.hitCount : null,
-      dataErrorMsgs: firstRaw && firstRaw.data ? firstRaw.data.errorMsgs : null,
-      hitCount: Array.isArray(hits) ? hits.length : 0,
-      sampleHitKeys: Array.isArray(hits) && hits[0] ? Object.keys(hits[0]) : null,
-      sampleHit: Array.isArray(hits) && hits[0] ? hits[0] : null,
-      errors,
-    });
-    return;
-  }
 
   // Dedupe by id (fallback to number, then title).
   const seen = new Set();
