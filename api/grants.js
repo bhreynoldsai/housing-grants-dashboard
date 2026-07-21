@@ -57,7 +57,7 @@ function mapHit(hit) {
   };
 }
 
-async function searchOnce(query) {
+async function searchRaw(query) {
   const body = { ...query, oppStatuses: STATUSES, rows: 25 };
   const res = await fetch(SEARCH_ENDPOINT, {
     method: "POST",
@@ -67,23 +67,53 @@ async function searchOnce(query) {
   if (!res.ok) {
     throw new Error(`Grants.gov search2 returned HTTP ${res.status}`);
   }
-  const json = await res.json();
-  return json?.data?.oppHits || json?.oppHits || json?.data?.hits || [];
+  return res.json();
+}
+
+function extractHits(json) {
+  return (
+    json?.data?.oppHits ||
+    json?.oppHits ||
+    json?.data?.hits ||
+    json?.hits ||
+    json?.data?.opportunities ||
+    (Array.isArray(json?.data) ? json.data : null) ||
+    []
+  );
 }
 
 export default async function handler(req, res) {
   const errors = [];
   const all = [];
+  let firstRaw = null;
 
   // Run all keyword searches concurrently; a failure of one doesn't sink the rest.
-  const results = await Promise.allSettled(QUERIES.map((q) => searchOnce(q)));
+  const results = await Promise.allSettled(QUERIES.map((q) => searchRaw(q)));
   results.forEach((r, i) => {
     if (r.status === "fulfilled") {
-      r.value.forEach((hit) => all.push(mapHit(hit)));
+      if (!firstRaw) firstRaw = r.value;
+      extractHits(r.value).forEach((hit) => all.push(mapHit(hit)));
     } else {
       errors.push({ query: QUERIES[i], error: String(r.reason && r.reason.message ? r.reason.message : r.reason) });
     }
   });
+
+  // Temporary: expose the raw response structure so field mapping can be
+  // confirmed against the live API. Access via /api/grants?debug=1
+  if (req.query && req.query.debug) {
+    const hits = extractHits(firstRaw);
+    res.setHeader("Cache-Control", "no-store");
+    res.status(200).json({
+      topKeys: firstRaw ? Object.keys(firstRaw) : null,
+      dataKeys: firstRaw && firstRaw.data ? Object.keys(firstRaw.data) : null,
+      dataType: firstRaw && firstRaw.data ? (Array.isArray(firstRaw.data) ? "array" : typeof firstRaw.data) : null,
+      hitCount: Array.isArray(hits) ? hits.length : 0,
+      sampleHitKeys: Array.isArray(hits) && hits[0] ? Object.keys(hits[0]) : null,
+      sampleHit: Array.isArray(hits) && hits[0] ? hits[0] : null,
+      errors,
+    });
+    return;
+  }
 
   // Dedupe by id (fallback to number, then title).
   const seen = new Set();
