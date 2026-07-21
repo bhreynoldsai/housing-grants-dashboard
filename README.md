@@ -109,3 +109,7 @@ S3, etc.) — this is a fully static site; there is no backend/server component.
 - Tailwind CSS 3
 - lucide-react (icons)
 - Node 18+ for the fetch script (built-in `fetch`, no extra HTTP library)
+
+## Live
+
+Public dashboard: https://housing-grants-dashboard.vercel.app
