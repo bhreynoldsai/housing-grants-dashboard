@@ -129,7 +129,59 @@ export default function App() {
     };
   }, []);
 
-  const locationInfo = useMemo(() => classifyLocation(cityCounty, state, hudLive), [cityCounty, state, hudLive]);
+  // Tier 0 — geocoded point-in-polygon against HUD's grantee boundaries
+  // (via /api/locate). Debounced so we don't geocode every keystroke.
+  const [geo, setGeo] = useState({ status: "idle", q: null, result: null });
+  useEffect(() => {
+    const input = cityCounty.trim();
+    if (input.length < 3) {
+      setGeo({ status: "idle", q: null, result: null });
+      return;
+    }
+    const q = state === "US" ? `${input}, USA` : `${input}, ${STATE_LABELS[state]}`;
+    setGeo({ status: "loading", q, result: null });
+    const t = setTimeout(() => {
+      fetch(`/api/locate?q=${encodeURIComponent(q)}`)
+        .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
+        .then((result) => setGeo((g) => (g.q === q ? { status: "done", q, result } : g)))
+        .catch(() => setGeo((g) => (g.q === q ? { status: "error", q, result: null } : g)));
+    }, 600);
+    return () => clearTimeout(t);
+  }, [cityCounty, state]);
+
+  const locationInfo = useMemo(() => {
+    const nameVerdict = classifyLocation(cityCounty, state, hudLive);
+    if (!nameVerdict) return null;
+
+    // Authoritative boundary verdict, when the geocoded lookup has landed.
+    if (geo.status === "done" && geo.result?.found && geo.result.cdbg) {
+      const c = geo.result.cdbg;
+      const h = geo.result.home;
+      const place = (geo.result.matched || "").split(",").slice(0, 3).join(",");
+      if (c.nonEntitlement) {
+        return {
+          label: "Confirmed Non-Entitlement (Rural/Small Town)",
+          detail: `${place} falls inside the state non-entitlement balance area in HUD's official grantee boundaries — CDBG/HOME funding flows through ${STATE_AGENCY_NAME[state] || "your state's program"}, and USDA Rural Development programs likely apply (verify at rd.usda.gov/eligibility).`,
+          areaGuess: "Rural",
+          source: geo.result.source,
+        };
+      }
+      return {
+        label: `HUD Entitlement Area — ${c.name} (${c.typeLabel})`,
+        detail: `${place} falls inside the "${c.name}" ${c.typeLabel} boundary in HUD's official grantee dataset${
+          h && !h.nonEntitlement ? `, and inside the "${h.name}" HOME ${h.typeLabel} boundary` : ""
+        } — this community's CDBG${h && !h.nonEntitlement ? "/HOME" : ""} funds flow through that grantee, so urban entitlement programs apply here.`,
+        areaGuess: "Urban",
+        source: geo.result.source,
+      };
+    }
+
+    // Otherwise: name-based tiers, flagged while the boundary check runs.
+    if (geo.status === "loading") {
+      return { ...nameVerdict, source: `${nameVerdict.source} — verifying against HUD boundaries…` };
+    }
+    return nameVerdict;
+  }, [cityCounty, state, hudLive, geo]);
 
   const effectiveAreaFilter = useMemo(() => {
     if (areaFilter !== "All") return areaFilter;
