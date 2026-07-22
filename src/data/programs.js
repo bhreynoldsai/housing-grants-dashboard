@@ -790,13 +790,16 @@ export const PROGRAMS = [
    the search a useful default; every result set still surfaces all applicable
    federal programs regardless of this classification. */
 export const GA_ENTITLEMENT = [
-  // --- Principal entitlement cities & urban counties ---
-  "atlanta", "fulton county", "dekalb county", "gwinnett county", "cobb county",
-  "clayton county", "chatham county", "savannah", "augusta", "augusta-richmond county",
-  "richmond county", "columbus", "columbus-muscogee county", "muscogee county",
-  "macon", "macon-bibb county", "bibb county", "albany", "dougherty county",
+  // --- Direct grantees (cross-checked against HUD's live CDBG/HOME grantee
+  //     list via /api/hud-entitlements, 2026-07; the live data is consulted
+  //     first — this subset is an offline fallback) ---
+  "atlanta", "fulton county", "dekalb county", "de kalb county", "gwinnett county",
+  "cobb county", "cherokee county", "clayton county", "savannah",
+  "augusta", "augusta-richmond county", "richmond county",
+  "columbus", "columbus-muscogee county", "muscogee county",
+  "macon", "macon-bibb county", "bibb county", "albany",
   "athens", "athens-clarke county", "clarke county",
-  "valdosta", "lowndes county", "douglas county", "henry county", "newton county",
+  "valdosta", "henry county", "dalton", "gainesville", "hinesville", "brunswick", "rome",
   // --- Fulton County municipalities (urban county grantee) ---
   "union city", "east point", "college park", "fairburn", "palmetto", "hapeville",
   "chattahoochee hills", "milton", "johns creek", "alpharetta", "mountain park",
@@ -813,12 +816,10 @@ export const GA_ENTITLEMENT = [
   "forest park", "jonesboro", "lake city", "lovejoy", "morrow", "riverdale",
   // --- Henry County municipalities ---
   "mcdonough", "stockbridge", "hampton", "locust grove",
-  // --- Chatham County (Savannah metro) municipalities ---
-  "pooler", "garden city", "port wentworth", "tybee island", "thunderbolt", "bloomingdale",
-  // --- Richmond County (Augusta) municipalities ---
-  "hephzibah", "blythe",
+  // --- Cherokee County municipalities (HUD-confirmed urban county) ---
+  "woodstock", "canton", "holly springs", "ball ground",
   // --- Other entitlement cities ---
-  "warner robins", "houston county",
+  "warner robins",
 ];
 
 /* Illustrative fallback list of larger Missouri HUD entitlement jurisdictions,
