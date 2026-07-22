@@ -50,7 +50,9 @@ function classifyLocation(cityCounty, state, hudLive) {
     const match = liveJurisdictions.find((j) => {
       if (!j.name) return false;
       const jn = j.name.toLowerCase();
-      const nameMatch = jn === normKey || jn.includes(normKey) || (normKey.length >= 4 && normKey.includes(jn));
+      const nameMatch =
+        jn === normKey ||
+        (normKey.length >= 4 && (jn.includes(normKey) || normKey.includes(jn)));
       const stateMatch = state === "US" ? true : (j.state || "").toUpperCase() === state;
       return nameMatch && stateMatch;
     });

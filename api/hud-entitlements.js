@@ -63,12 +63,42 @@ function pick(attrs, keys, fallback = null) {
   return fallback;
 }
 
+// Confirmed live schema (2026-07): NAME (all-caps grantee name), STUSAB
+// (postal state), STATE (FIPS), TYPE (HUD UOG code — "21" marks the
+// state non-entitlement balance area, e.g. "AR NONENTITLEMENT").
+const STATE_NAMES = new Set([
+  "alabama","alaska","arizona","arkansas","california","colorado","connecticut","delaware",
+  "florida","georgia","hawaii","idaho","illinois","indiana","iowa","kansas","kentucky",
+  "louisiana","maine","maryland","massachusetts","michigan","minnesota","mississippi",
+  "missouri","montana","nebraska","nevada","new hampshire","new jersey","new mexico",
+  "new york","north carolina","north dakota","ohio","oklahoma","oregon","pennsylvania",
+  "rhode island","south carolina","south dakota","tennessee","texas","utah","vermont",
+  "virginia","washington","west virginia","wisconsin","wyoming","district of columbia",
+  "puerto rico","guam","american samoa","northern mariana islands","u.s. virgin islands",
+]);
+
 function mapFeature(feature, program) {
   const a = feature.attributes || {};
+  const name = pick(a, ["NAME", "GranteeName", "GRANTEE_NAME", "JURISDICTION", "GRANTEE"]);
+  const typeCode = String(pick(a, ["TYPE", "GranteeType", "GRANTEE_TYPE"], ""));
+  const lower = (name || "").toLowerCase();
+
+  // Exclude records that must never yield an "urban entitlement" verdict:
+  // state non-entitlement balance areas and state-level grantees.
+  const isNonEntitlement = typeCode === "21" || lower.includes("nonentitlement") || lower.includes("non-entitlement");
+  const isStateRecord = STATE_NAMES.has(lower);
+  if (!name || isNonEntitlement || isStateRecord) return null;
+
+  const type = lower.includes("county")
+    ? "Urban County"
+    : program === "HOME"
+    ? "Participating Jurisdiction"
+    : "Entitlement City";
+
   return {
-    name: pick(a, ["NAME", "GranteeName", "GRANTEE_NAME", "GRANTEE_NM", "JURISDICTION", "ENTITY_NAME", "GRANTEE", "PLACENAME", "PLACE_NAME"]),
-    state: pick(a, ["ST", "STATE", "State", "STATE_ABBR", "STUSPS", "STATE_NM", "ST_ABBREV"]),
-    type: pick(a, ["TYPE", "GranteeType", "GRANTEE_TYPE", "GRANTEE_TY", "ENTITLEMENT", "CATEGORY", "STATUS", "PROGRAM_TY"]),
+    name,
+    state: pick(a, ["STUSAB", "STUSPS", "ST", "STATE_ABBR"]), // postal abbr, NOT the FIPS "STATE" field
+    type,
     program,
   };
 }
@@ -94,34 +124,27 @@ export default async function handler(req, res) {
       meta.push({ key, serviceUrl, count: features.length });
       features.forEach((f) => {
         const j = mapFeature(f, program);
-        if (j.name) jurisdictions.push(j);
+        if (j) jurisdictions.push(j);
       });
     } else {
       errors.push({ dataset: DATASETS[i].key, error: String(r.reason && r.reason.message ? r.reason.message : r.reason) });
     }
   });
 
-  // Temporary: inspect HUD's live attribute schema via /api/hud-entitlements?debug=1
-  if (req.query && req.query.debug) {
-    res.setHeader("Cache-Control", "no-store");
-    res.status(200).json({
-      meta,
-      firstRawAttrs,
-      mappedSample: jurisdictions.slice(0, 5),
-      unmappedNameCount: meta.reduce((s, m) => s + m.count, 0) - jurisdictions.length,
-      errors,
-    });
-    return;
-  }
-
   // Dedupe on name+state+program.
   const seen = new Set();
-  const deduped = [];
+  let deduped = [];
   for (const j of jurisdictions) {
     const k = `${j.name}|${j.state}|${j.program}`.toLowerCase();
     if (seen.has(k)) continue;
     seen.add(k);
     deduped.push(j);
+  }
+
+  // Optional ?state=GA filter (postal abbreviation) to slim the payload.
+  const stateFilter = req.query && req.query.state ? String(req.query.state).toUpperCase() : null;
+  if (stateFilter && stateFilter !== "US") {
+    deduped = deduped.filter((j) => (j.state || "").toUpperCase() === stateFilter);
   }
 
   res.setHeader("Cache-Control", "s-maxage=86400, stale-while-revalidate=604800");
