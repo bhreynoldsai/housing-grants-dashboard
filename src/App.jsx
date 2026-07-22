@@ -54,16 +54,26 @@ function classifyLocation(cityCounty, state) {
   if (state === "GA" || state === "MO") {
     const list = STATIC_ENTITLEMENT[state];
     const agencyName = STATE_AGENCY_NAME[state];
-    const isEntitlement = list.some((e) => key.includes(e) || e.includes(key));
+    // Normalize a typed location ("Union City, GA", "City of Decatur") before matching.
+    const norm = key
+      .replace(/,?\s*(ga|georgia|mo|missouri)\.?$/i, "")
+      .replace(/^(city|town|city of|town of)\s+/i, "")
+      .trim();
+    const isEntitlement = list.some((e) => {
+      if (norm === e) return true;
+      if (norm.includes(e)) return true; // "union city, fulton" contains "union city"
+      if (norm.length >= 4 && e.includes(norm)) return true; // "union" -> "union city"
+      return false;
+    });
     return isEntitlement
       ? {
-          label: "Likely HUD Entitlement Jurisdiction",
-          detail: `This city/county appears on ${STATE_LABELS[state]}'s list of larger, direct-funded HUD entitlement communities — it likely receives CDBG/HOME formula funds directly rather than applying through ${agencyName}.`,
+          label: "Likely HUD Entitlement Jurisdiction (Urban)",
+          detail: `This community is within (or is) a HUD entitlement grantee in ${STATE_LABELS[state]} — it receives CDBG/HOME funds through a direct-funded city or its urban county, not through ${agencyName}'s non-entitlement (rural) program. Urban programs such as CDBG-Entitlement and Choice Neighborhoods apply here.`,
           areaGuess: "Urban",
         }
       : {
           label: "Likely Non-Entitlement (Rural/Small Town)",
-          detail: `Not recognized as a direct HUD entitlement jurisdiction — CDBG/HOME funding for this community typically flows through ${agencyName}, and it is likely eligible for USDA Rural Development programs (verify at rd.usda.gov's eligibility map).`,
+          detail: `Not recognized as a HUD entitlement jurisdiction — CDBG/HOME funding for this community typically flows through ${agencyName}, and it is likely eligible for USDA Rural Development programs (verify at rd.usda.gov's eligibility map). If this is a metro-area suburb, clear the location or set the area filter to "Urban" to see entitlement programs too.`,
           areaGuess: "Rural",
         };
   }

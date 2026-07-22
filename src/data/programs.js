@@ -790,12 +790,35 @@ export const PROGRAMS = [
    the search a useful default; every result set still surfaces all applicable
    federal programs regardless of this classification. */
 export const GA_ENTITLEMENT = [
+  // --- Principal entitlement cities & urban counties ---
   "atlanta", "fulton county", "dekalb county", "gwinnett county", "cobb county",
   "clayton county", "chatham county", "savannah", "augusta", "augusta-richmond county",
   "richmond county", "columbus", "columbus-muscogee county", "muscogee county",
-  "macon", "macon-bibb county", "bibb county", "albany", "athens", "athens-clarke county",
-  "clarke county", "roswell", "sandy springs", "warner robins", "marietta", "smyrna",
+  "macon", "macon-bibb county", "bibb county", "albany", "dougherty county",
+  "athens", "athens-clarke county", "clarke county",
   "valdosta", "lowndes county", "douglas county", "henry county", "newton county",
+  // --- Fulton County municipalities (urban county grantee) ---
+  "union city", "east point", "college park", "fairburn", "palmetto", "hapeville",
+  "chattahoochee hills", "milton", "johns creek", "alpharetta", "mountain park",
+  "south fulton", "roswell", "sandy springs",
+  // --- DeKalb County municipalities (urban county grantee) ---
+  "brookhaven", "chamblee", "clarkston", "decatur", "doraville", "dunwoody",
+  "lithonia", "pine lake", "stone mountain", "stonecrest", "tucker", "avondale estates",
+  // --- Cobb County municipalities ---
+  "marietta", "smyrna", "kennesaw", "acworth", "austell", "powder springs", "mableton",
+  // --- Gwinnett County municipalities ---
+  "lawrenceville", "duluth", "norcross", "snellville", "suwanee", "sugar hill", "buford",
+  "lilburn", "grayson", "berkeley lake", "dacula", "peachtree corners", "loganville",
+  // --- Clayton County municipalities ---
+  "forest park", "jonesboro", "lake city", "lovejoy", "morrow", "riverdale",
+  // --- Henry County municipalities ---
+  "mcdonough", "stockbridge", "hampton", "locust grove",
+  // --- Chatham County (Savannah metro) municipalities ---
+  "pooler", "garden city", "port wentworth", "tybee island", "thunderbolt", "bloomingdale",
+  // --- Richmond County (Augusta) municipalities ---
+  "hephzibah", "blythe",
+  // --- Other entitlement cities ---
+  "warner robins", "houston county",
 ];
 
 /* Illustrative fallback list of larger Missouri HUD entitlement jurisdictions,
