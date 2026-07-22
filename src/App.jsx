@@ -2,7 +2,7 @@ import React, { useState, useMemo, useEffect } from "react";
 import {
   Search, MapPin, Filter, X, ExternalLink, Info, Star,
   Home, Building2, Landmark, DollarSign, RefreshCw,
-  TreePine, Check, ClipboardList, Radio,
+  TreePine, Check, ClipboardList, Radio, FileDown,
 } from "lucide-react";
 import { PROGRAMS, CATEGORIES, GA_ENTITLEMENT, MO_ENTITLEMENT, HUD_ENTITLEMENT_LIVE } from "./data/programs.js";
 import liveData from "./data/liveOpportunities.json";
@@ -28,25 +28,38 @@ function classNames(...xs) {
 
 const STATE_AGENCY_NAME = { GA: "GA DCA", MO: "MHDC" };
 
-function classifyLocation(cityCounty, state) {
+function classifyLocation(cityCounty, state, hudLive) {
   if (!cityCounty.trim()) return null;
   const key = cityCounty.trim().toLowerCase();
 
-  // Prefer live, machine-fetched HUD data (see scripts/fetch-hud-entitlements.mjs)
-  // if it has been populated. Falls back to the static illustrative lists below.
-  const liveJurisdictions = HUD_ENTITLEMENT_LIVE?.jurisdictions || [];
+  // 1) HUD's authoritative grantee data — fetched at runtime from
+  //    /api/hud-entitlements (HUD ArcGIS Open Data), falling back to any
+  //    build-time snapshot in hudEntitlementCommunities.json. Note: HUD
+  //    lists GRANTEES by name (e.g. "Fulton County"), so municipalities
+  //    that participate through an urban county are matched by the
+  //    curated member-city list in step 2 instead.
+  const liveJurisdictions =
+    (hudLive && hudLive.jurisdictions && hudLive.jurisdictions.length > 0
+      ? hudLive.jurisdictions
+      : HUD_ENTITLEMENT_LIVE?.jurisdictions) || [];
   if (liveJurisdictions.length > 0) {
+    const normKey = key
+      .replace(/,?\s*(ga|georgia|mo|missouri)\.?$/i, "")
+      .replace(/^(city|town|city of|town of)\s+/i, "")
+      .trim();
     const match = liveJurisdictions.find((j) => {
       if (!j.name) return false;
-      const nameMatch = j.name.toLowerCase().includes(key) || key.includes(j.name.toLowerCase());
+      const jn = j.name.toLowerCase();
+      const nameMatch = jn === normKey || jn.includes(normKey) || (normKey.length >= 4 && normKey.includes(jn));
       const stateMatch = state === "US" ? true : (j.state || "").toUpperCase() === state;
       return nameMatch && stateMatch;
     });
     if (match) {
       return {
-        label: `HUD Entitlement Match (${match.program}${match.type ? `: ${match.type}` : ""})`,
-        detail: `Matched against HUD's live ${match.program} grantee dataset (fetched ${new Date(HUD_ENTITLEMENT_LIVE.fetchedAt).toLocaleDateString()}). This jurisdiction receives ${match.program} funds directly.`,
+        label: `HUD Entitlement Grantee (${match.program}${match.type ? `: ${match.type}` : ""})`,
+        detail: `Matched "${match.name}" in HUD's official ${match.program} grantee dataset (HUD ArcGIS Open Data${hudLive?.fetchedAt ? `, fetched ${new Date(hudLive.fetchedAt).toLocaleDateString()}` : ""}). This jurisdiction receives ${match.program} funds directly from HUD.`,
         areaGuess: "Urban",
+        source: "HUD ArcGIS Open Data (official grantee list)",
       };
     }
   }
@@ -70,11 +83,13 @@ function classifyLocation(cityCounty, state) {
           label: "Likely HUD Entitlement Jurisdiction (Urban)",
           detail: `This community is within (or is) a HUD entitlement grantee in ${STATE_LABELS[state]} — it receives CDBG/HOME funds through a direct-funded city or its urban county, not through ${agencyName}'s non-entitlement (rural) program. Urban programs such as CDBG-Entitlement and Choice Neighborhoods apply here.`,
           areaGuess: "Urban",
+          source: "Curated urban-county member-city list (verify against HUD's grantee list)",
         }
       : {
           label: "Likely Non-Entitlement (Rural/Small Town)",
           detail: `Not recognized as a HUD entitlement jurisdiction — CDBG/HOME funding for this community typically flows through ${agencyName}, and it is likely eligible for USDA Rural Development programs (verify at rd.usda.gov's eligibility map). If this is a metro-area suburb, clear the location or set the area filter to "Urban" to see entitlement programs too.`,
           areaGuess: "Rural",
+          source: "Not found in HUD grantee data or curated lists (verify at rd.usda.gov/eligibility)",
         };
   }
   return {
@@ -82,6 +97,7 @@ function classifyLocation(cityCounty, state) {
     detail:
       "Outside Georgia and Missouri, check your state's HUD entitlement list and USDA Rural Development's eligibility map (rd.usda.gov/eligibility) to confirm rural vs. urban designation for this location.",
     areaGuess: null,
+    source: "No authoritative match — manual verification recommended",
   };
 }
 
@@ -95,7 +111,23 @@ export default function App() {
   const [shortlist, setShortlist] = useState([]);
   const [active, setActive] = useState(null);
 
-  const locationInfo = useMemo(() => classifyLocation(cityCounty, state), [cityCounty, state]);
+  // HUD's official grantee dataset, fetched at runtime from our
+  // /api/hud-entitlements serverless proxy (HUD ArcGIS Open Data).
+  const [hudLive, setHudLive] = useState(null);
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/hud-entitlements")
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
+      .then((d) => {
+        if (!cancelled && Array.isArray(d.jurisdictions) && d.jurisdictions.length > 0) setHudLive(d);
+      })
+      .catch(() => {}); // fall back silently to curated lists
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const locationInfo = useMemo(() => classifyLocation(cityCounty, state, hudLive), [cityCounty, state, hudLive]);
 
   const effectiveAreaFilter = useMemo(() => {
     if (areaFilter !== "All") return areaFilter;
@@ -132,6 +164,176 @@ export default function App() {
 
   function toggleShortlist(id) {
     setShortlist((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id]));
+  }
+
+  const [exporting, setExporting] = useState(false);
+
+  // Generate a downloadable PDF report of the current search results,
+  // classification verdict, shortlist, and live opportunities.
+  async function exportPdf() {
+    setExporting(true);
+    try {
+      const { jsPDF } = await import("jspdf");
+      const autoTable = (await import("jspdf-autotable")).default;
+
+      const doc = new jsPDF({ unit: "pt", format: "letter" });
+      const pageW = doc.internal.pageSize.getWidth();
+      const margin = 48;
+      const navy = [11, 31, 58];
+      const gold = [201, 162, 39];
+      const now = new Date();
+
+      // Header band
+      doc.setFillColor(...navy);
+      doc.rect(0, 0, pageW, 86, "F");
+      doc.setFillColor(...gold);
+      doc.rect(0, 86, pageW, 4, "F");
+      doc.setTextColor(245, 242, 234);
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(18);
+      doc.text("Housing Grants & Programs Report", margin, 40);
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(10);
+      doc.text(
+        `Generated ${now.toLocaleDateString()} ${now.toLocaleTimeString()} — Housing Grants & Programs Registry`,
+        margin,
+        60
+      );
+
+      // Search context
+      let y = 116;
+      doc.setTextColor(27, 36, 48);
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(12);
+      doc.text("Search Context", margin, y);
+      y += 8;
+      doc.setDrawColor(...gold);
+      doc.setLineWidth(1.5);
+      doc.line(margin, y, margin + 90, y);
+      y += 16;
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(9.5);
+      const ctxLines = [
+        `Location: ${cityCounty.trim() || "(none entered)"}   |   State: ${STATE_LABELS[state]}`,
+        `Keyword search: ${query.trim() || "(none)"}   |   Filters — Area: ${areaFilter}${
+          effectiveAreaFilter !== areaFilter ? ` (auto: ${effectiveAreaFilter})` : ""
+        }, Level: ${levelFilter}, Category: ${categoryFilter}`,
+      ];
+      if (locationInfo) {
+        ctxLines.push(`Classification: ${locationInfo.label}`);
+        const detail = doc.splitTextToSize(locationInfo.detail, pageW - margin * 2);
+        ctxLines.push(...detail);
+        if (locationInfo.source) ctxLines.push(`Classification source: ${locationInfo.source}`);
+      }
+      ctxLines.forEach((line) => {
+        doc.text(line, margin, y);
+        y += 13;
+      });
+      y += 6;
+
+      // Matching programs table
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(12);
+      doc.text(`Matching Programs (${filtered.length})`, margin, y);
+      y += 6;
+      autoTable(doc, {
+        startY: y + 4,
+        margin: { left: margin, right: margin },
+        head: [["Code", "Program", "Agency", "Level", "Area", "Category"]],
+        body: filtered.map((p) => [
+          p.code,
+          (shortlist.includes(p.id) ? "★ " : "") + p.name + (p.flagship ? "  [HUB PRIORITY]" : ""),
+          p.agency,
+          p.level,
+          p.area.join(" + "),
+          p.category,
+        ]),
+        styles: { fontSize: 7.5, cellPadding: 3, textColor: [27, 36, 48] },
+        headStyles: { fillColor: navy, textColor: [245, 242, 234], fontSize: 8 },
+        alternateRowStyles: { fillColor: [245, 242, 234] },
+        columnStyles: { 0: { cellWidth: 78 }, 1: { cellWidth: 150 } },
+      });
+
+      // Shortlist detail section
+      const short = PROGRAMS.filter((p) => shortlist.includes(p.id));
+      if (short.length > 0) {
+        doc.addPage();
+        let sy = 56;
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(12);
+        doc.setTextColor(27, 36, 48);
+        doc.text(`Shortlisted Programs — Detail (${short.length})`, margin, sy);
+        sy += 8;
+        doc.setDrawColor(...gold);
+        doc.line(margin, sy, margin + 160, sy);
+        sy += 18;
+        short.forEach((p) => {
+          const blockLines = [];
+          const push = (label, text) => {
+            doc.setFontSize(8.5);
+            const wrapped = doc.splitTextToSize(`${label}: ${text}`, pageW - margin * 2);
+            blockLines.push(...wrapped);
+          };
+          push("Funding", p.funding);
+          push("Eligibility", p.eligibility);
+          push("Source", `${p.sourceUrl}  (last checked ${p.lastVerified || "n/a"})`);
+          const blockHeight = 16 + blockLines.length * 11 + 14;
+          if (sy + blockHeight > doc.internal.pageSize.getHeight() - 56) {
+            doc.addPage();
+            sy = 56;
+          }
+          doc.setFont("helvetica", "bold");
+          doc.setFontSize(10);
+          doc.text(`${p.name}  (${p.code})`, margin, sy);
+          sy += 13;
+          doc.setFont("helvetica", "normal");
+          blockLines.forEach((l) => {
+            doc.text(l, margin, sy);
+            sy += 11;
+          });
+          sy += 12;
+        });
+      }
+
+      // Live opportunities
+      if (liveOpportunities.length > 0) {
+        doc.addPage();
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(12);
+        doc.setTextColor(27, 36, 48);
+        doc.text(`Live Grants.gov Opportunities (top ${Math.min(liveOpportunities.length, 20)})`, margin, 56);
+        autoTable(doc, {
+          startY: 68,
+          margin: { left: margin, right: margin },
+          head: [["Opportunity", "Agency", "Number", "Closes"]],
+          body: liveOpportunities.slice(0, 20).map((o) => [o.title || "—", o.agency || "—", o.number || "—", o.closeDate || "—"]),
+          styles: { fontSize: 7.5, cellPadding: 3, textColor: [27, 36, 48] },
+          headStyles: { fillColor: navy, textColor: [245, 242, 234], fontSize: 8 },
+          alternateRowStyles: { fillColor: [245, 242, 234] },
+        });
+      }
+
+      // Footer on every page
+      const pageCount = doc.getNumberOfPages();
+      for (let i = 1; i <= pageCount; i++) {
+        doc.setPage(i);
+        const h = doc.internal.pageSize.getHeight();
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(7);
+        doc.setTextColor(138, 133, 119);
+        doc.text(
+          "Compiled for grant-strategy use. Verify all figures, deadlines, and eligibility with the administering agency before submission.",
+          margin,
+          h - 30
+        );
+        doc.text(`Page ${i} of ${pageCount}`, pageW - margin, h - 30, { align: "right" });
+      }
+
+      const locSlug = cityCounty.trim() ? `-${cityCounty.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-")}` : "";
+      doc.save(`housing-grants-report${locSlug}-${now.toISOString().slice(0, 10)}.pdf`);
+    } finally {
+      setExporting(false);
+    }
   }
 
   // Live Grants.gov opportunities: fetched at runtime from our /api/grants
@@ -256,6 +458,11 @@ export default function App() {
               <div>
                 <span className="font-semibold">{locationInfo.label}.</span>{" "}
                 <span className="text-[#4B4636]">{locationInfo.detail}</span>
+                {locationInfo.source && (
+                  <div className="mt-1 text-[11px] text-[#8A8577]">
+                    Classification source: {locationInfo.source}
+                  </div>
+                )}
               </div>
             </div>
           )}
@@ -339,6 +546,19 @@ export default function App() {
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1fr_280px]">
           {/* Results list */}
           <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-semibold uppercase tracking-wide text-[#6B6552]">
+                {filtered.length} program{filtered.length === 1 ? "" : "s"} match
+              </span>
+              <button
+                onClick={exportPdf}
+                disabled={exporting || filtered.length === 0}
+                className="flex items-center gap-1.5 rounded-sm border border-navy bg-navy px-3 py-1.5 text-xs font-semibold text-[#F5F2EA] transition hover:bg-[#13294B] disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                <FileDown className="h-3.5 w-3.5" />
+                {exporting ? "Generating…" : "Export PDF Report"}
+              </button>
+            </div>
             {filtered.length === 0 && (
               <div className="rounded-sm border border-dashed border-[#C7BEA0] bg-white px-6 py-10 text-center text-[#6B6552]">
                 No programs match these filters. Try widening the area type or clearing the category filter.
